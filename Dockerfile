@@ -1,5 +1,5 @@
-FROM ubuntu:20.04
+FROM ubuntu:14.04
 
-RUN apt-get update && apt-get install -y curl && apt-get clean
+#RUN apt-get update && apt-get install -y curl && apt-get clean
 
 CMD ["bash"]
