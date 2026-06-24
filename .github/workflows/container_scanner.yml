@@ -36,6 +36,7 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH,MEDIUM'
           scanners: 'vuln'
+          limit-severities-for-sarif: 'true'
       - name: Summarise findings in the run log
         if: always()
         run: |
@@ -54,12 +55,12 @@ jobs:
         with:
           scan-type: image
           image-ref: 'container-image:${{ github.sha }}'
+          format: table
           exit-code: '0'
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL'
           scanners: 'vuln'
-          
       - name: Upload results as a downloadable artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   #v7.0.1
