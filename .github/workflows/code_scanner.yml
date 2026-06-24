@@ -33,7 +33,6 @@ jobs:
             -e HOME=/tmp \
             -v "$GITHUB_WORKSPACE":/src -w /src \
             "$IMAGE" scan \
-              --config /src/.security/opengrep \
               --error \
               --sarif --output /src/results.sarif \
               $BASE_ARG \
