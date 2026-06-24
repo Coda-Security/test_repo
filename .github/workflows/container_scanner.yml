@@ -36,7 +36,6 @@ jobs:
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH,MEDIUM'
           scanners: 'vuln'
-          limit-severities-for-sarif: 'true'
       - name: Summarise findings in the run log
         if: always()
         run: |
