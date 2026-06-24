@@ -25,11 +25,34 @@ jobs:
       - name: Build an image from Dockerfile
         run: docker build -t docker.io/Coda-Security/test-app:${{ github.sha }} .
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 #v0.36.0
         with:
+          scan-type: image
           image-ref: 'docker.io/Coda-Security/test-app:${{ github.sha }}'
-          format: 'table'
+          format: sarif
+          output: trivy-results.sarif
           exit-code: '1'
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
+      - name: Summarise findings in the run log
+        if: always()
+        run: |
+          if [ -f trivy-results.sarif ]; then
+            count=$(jq '[.runs[].results[]] | length' trivy-results.sarif 2>/dev/null || echo 0)
+            echo "Trivy reported ${count} CRITICAL/HIGH findings for the container image" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            jq -r '.runs[].results[] | "- " + (.ruleId // "?") + ": " + (.message.text // "")' \
+              trivy-results.sarif 2>/dev/null | head -40 | tee -a "$GITHUB_STEP_SUMMARY" || true
+          else
+            echo "No SARIF produced — the scan step likely failed; check its log." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results as a downloadable artifact
+        if: always()
+        uses: actions/upload-artifact@<SHA>   # pin
+        with:
+          name: trivy-results
+          path: trivy-results.sarif
+          
