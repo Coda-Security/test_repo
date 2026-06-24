@@ -57,7 +57,7 @@ jobs:
           exit-code: '0'
           ignore-unfixed: true
           vuln-type: 'os,library'
-          severity: 'CRITICAL
+          severity: 'CRITICAL'
           scanners: 'vuln'
       - name: Upload results as a downloadable artifact
         if: always()
