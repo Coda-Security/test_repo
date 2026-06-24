@@ -4,11 +4,11 @@ name: CI
 
 # Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
-    branches: [ "main" ]
-  pull_request:
-
+    branches: [main]      # post-merge baseline; also what populates the Security tab
+  release:
+    types: [published]    # hard gate before the image ships to ECR/GCR
+    
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
