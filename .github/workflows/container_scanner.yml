@@ -28,7 +28,7 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 #v0.36.0
         with:
           scan-type: image
-          image-ref: 'docker.io/Coda-Security/test-app:${{ github.sha }}'
+          image-ref: 'docker.io/coda-security/test-app:${{ github.sha }}'
           format: sarif
           output: trivy-results.sarif
           exit-code: '0'
