@@ -10,7 +10,7 @@ permissions:
   security-events: write        # required to upload SARIF to code scanning
 
 jobs:
-  opengrep:
+  sast-scanner:
     runs-on: ubuntu-latest       # see note on self-hosted below
     env:
       IMAGE: public.ecr.aws/x1b3t1s7/coda-security/sast-scanner:latest
@@ -24,16 +24,17 @@ jobs:
         env:
           BASELINE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: |
+          docker pull "$IMAGE"
           BASE_ARG=""
           [ -n "$BASELINE" ] && BASE_ARG="--baseline-commit $BASELINE"
           docker run --rm \
-            --network none \                   # vendored rules => no egress needed
+            --network none \
             --user "$(id -u):$(id -g)" \
             -e HOME=/tmp \
             -v "$GITHUB_WORKSPACE":/src -w /src \
             "$IMAGE" scan \
               --config /src/.security/opengrep \
-              --error \                         # fail the job on findings (see note)
+              --error \
               --sarif --output /src/results.sarif \
               $BASE_ARG \
               /src
