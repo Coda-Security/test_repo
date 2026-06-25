@@ -79,17 +79,29 @@ jobs:
           {
             echo "## SAST Scan Results"
             echo ""
-            echo "| Severity | Rule | Location | Message |"
-            echo "|---|---|---|---|"
-            jq -r '
-              def sev($l): if $l=="error" then "HIGH" elif $l=="note" then "LOW" else "MEDIUM" end;
-              .runs[].results[]
-              | ((.level // "warning")) as $lvl
-              | "| \(sev($lvl)) "
-                + "| `\(.ruleId)` "
-                + "| `\(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine // 1)` "
-                + "| \((.message.text)|gsub("\n";" ")|gsub("\\|";"\\\\|")) |"
-            ' results.sarif
+            if [ ! -s results.sarif ] || ! jq -e . results.sarif >/dev/null 2>&1; then
+              echo "> ⚠️ No SARIF was produced or it could not be parsed — the scan likely failed."
+              echo "> **Do not read this as a clean result.** Check the scan step logs."
+            else
+              TOTAL=$(jq '[.runs[].results[]] | length' results.sarif)
+              if [ "$TOTAL" -eq 0 ]; then
+                echo "✅ **No findings.** SAST scan completed and reported 0 findings."
+              else
+                echo "**${TOTAL}** SAST scan finding(s)."
+                echo ""
+                echo "| Severity | Rule | Location | Message |"
+                echo "|---|---|---|---|"
+                jq -r '
+                  def sev($l): if $l=="error" then "HIGH" elif $l=="note" then "LOW" else "MEDIUM" end;
+                  .runs[].results[]
+                  | ((.level // "warning")) as $lvl
+                  | "| \(sev($lvl)) "
+                    + "| `\(.ruleId)` "
+                    + "| `\(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine // 1)` "
+                    + "| \((.message.text)|gsub("\n";" ")|gsub("\\|";"\\\\|")) |"
+                ' results.sarif
+              fi
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
       # - name: Gate PR on findings
       #   run: |
