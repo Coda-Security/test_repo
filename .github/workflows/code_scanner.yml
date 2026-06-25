@@ -32,6 +32,10 @@ jobs:
             "$IMAGE" scan \
               --config /opt/scanner-rules \
               --sarif --output /src/results.sarif \
+              --disable-version-check \
+              --max-memory 4000 \
+              --max-target-bytes 1500000 \
+              --exclude node_modules --exclude vendor --exclude '*.min.js' --exclude dist \
               $BASE_ARG /src
           test -s results.sarif || { echo "No SARIF produced"; exit 1; }
 
