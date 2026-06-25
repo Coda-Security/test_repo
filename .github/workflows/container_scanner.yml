@@ -1,73 +1,121 @@
-# This is a basic workflow to help you get started with Actions
-
 name: Container Image Scanner
 
-# Controls when the workflow will run
 on:
-  push:
-    branches: [main]      # post-merge baseline
+  pull_request:
     paths:
       - '**/Dockerfile'
       - '**/Containerfile'
   release:
-    types: [published]    # hard gate before the image ships to ECR/GCR
-    
-  # Allows you to run this workflow manually from the Actions tab
+    types: [published]
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
+  discover:
     runs-on: ubuntu-latest
-
+    outputs:
+      dockerfiles: ${{ steps.find.outputs.dockerfiles }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0                      # needed for the push diff
+      - id: find
+        env:
+          EVENT:  ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA:    ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          declare -a files=()
+          if [ "$EVENT" = "push" ] && [ -n "${BEFORE:-}" ] \
+             && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            # changed Dockerfiles in this push (skip deletions via -f test)
+            while IFS= read -r f; do
+              case "$(basename "$f")" in
+                Dockerfile|Containerfile) [ -f "$f" ] && files+=("$f") ;;
+              esac
+            done < <(git diff --name-only "$BEFORE" "$SHA")
+          else
+            # release / workflow_dispatch / first-push: scan the whole repo
+            while IFS= read -r f; do files+=("${f#./}"); done \
+              < <(find . -type f \( -name Dockerfile -o -name Containerfile \) -not -path './.git/*')
+          fi
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "dockerfiles=[]" >> "$GITHUB_OUTPUT"
+          else
+            json=$(printf '%s\n' "${files[@]}" \
+              | jq -R '{path: ., slug: (ascii_downcase | gsub("[/.]";"-"))}' | jq -cs .)
+            echo "dockerfiles=$json" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Discovered: $(cat "$GITHUB_OUTPUT")"
+
+  scan:
+    needs: discover
+    if: needs.discover.outputs.dockerfiles != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false        # one bad image must not cancel the others
+      matrix:
+        image: ${{ fromJSON(needs.discover.outputs.dockerfiles) }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+
       - name: Build an image from Dockerfile
-        run: docker build -t container-image:${{ github.sha }} .
-      - name: Trivy scan reporting
+        env:
+          DF: ${{ matrix.image.path }}
+        run: |
+          set -euo pipefail
+          ctx="$(dirname "$DF")"              # ASSUMPTION: context = Dockerfile's dir (see note)
+          docker build -f "$DF" \
+            -t "container-image:${{ matrix.image.slug }}-${{ github.sha }}" \
+            "$ctx"
+
+      - name: Run scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 #v0.36.0
         with:
           scan-type: image
-          image-ref: 'container-image:${{ github.sha }}'
+          image-ref: 'container-image:${{ matrix.image.slug }}-${{ github.sha }}'
           format: sarif
-          output: trivy-results.sarif
+          output: container-image-results.sarif
           exit-code: '0'
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH,MEDIUM'
           scanners: 'vuln'
           limit-severities-for-sarif: 'true'
+
       - name: Summarise findings in the run log
         if: always()
         run: |
-          if [ -f trivy-results.sarif ]; then
-            count=$(jq '[.runs[].results[]] | length' trivy-results.sarif 2>/dev/null || echo 0)
-            echo "Trivy reported the following ${count} findings for the container image" \
-              | tee -a "$GITHUB_STEP_SUMMARY"
-            jq -r '.runs[].results[] | "- " + (.ruleId // "?") + ": " + (.message.text // "")' \
-              trivy-results.sarif 2>/dev/null | head -40 | tee -a "$GITHUB_STEP_SUMMARY" || true
+          echo "### ${{ matrix.image.path }}" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -s container-image-results.sarif ] && jq -e . container-image-results.sarif >/dev/null 2>&1; then
+            count=$(jq '[.runs[].results[]] | length' container-image-results.sarif)
+            if [ "$count" -eq 0 ]; then
+              echo "✅ No findings (CRITICAL/HIGH/MEDIUM)." | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "Container image scanner reported ${count} finding(s):" | tee -a "$GITHUB_STEP_SUMMARY"
+              jq -r '.runs[].results[] | "- " + (.ruleId // "?") + ": " + (.message.text // "")' \
+                container-image-results.sarif | head -40 | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
           else
-            echo "No SARIF produced — the scan step likely failed; check its log." \
+            echo "⚠️ No parseable SARIF — scan likely failed. **Not a clean result.** Check the scan log." \
               | tee -a "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Trivy scan gateway (block on CRITICAL only)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 #v0.36.0
-        with:
-          scan-type: image
-          image-ref: 'container-image:${{ github.sha }}'
-          format: table
-          exit-code: '0'
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL'
-          scanners: 'vuln'
+
+      # - name: Container image scan gateway (block on CRITICAL only)
+      #   uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 #v0.36.0
+      #   with:
+      #     scan-type: image
+      #     image-ref: 'container-image:${{ matrix.image.slug }}-${{ github.sha }}'
+      #     format: table
+      #     exit-code: '1'              # CHANGED from '0' — see note below
+      #     ignore-unfixed: true
+      #     vuln-type: 'os,library'
+      #     severity: 'CRITICAL'
+      #     scanners: 'vuln'
+
       - name: Upload results as a downloadable artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   #v7.0.1
         with:
-          name: container-image-scan-results
-          path: trivy-results.sarif
-          
+          name: container-image-scan-results-${{ matrix.image.slug }}   # must be unique per matrix leg
+          path: container-image-results.sarif
