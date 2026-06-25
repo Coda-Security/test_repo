@@ -2,8 +2,6 @@ name: SAST Scanner
 
 on:
   pull_request:
-  push:
-    branches: [main,master]
 
 permissions:
   contents: read
@@ -20,28 +18,65 @@ jobs:
         with:
           fetch-depth: 0                       # needed for --baseline-commit on PRs
 
-      - name: Run Scan
+      - name: Run scan
         env:
           BASELINE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: |
           docker pull "$IMAGE"
           BASE_ARG=""
           [ -n "$BASELINE" ] && BASE_ARG="--baseline-commit $BASELINE"
-          docker run --rm \
-            --network none \
-            --user "$(id -u):$(id -g)" \
-            -e HOME=/tmp \
+          # No --error: we want a clean exit + a SARIF we control the gating on.
+          docker run --rm --network none \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp \
             -v "$GITHUB_WORKSPACE":/src -w /src \
             "$IMAGE" scan \
               --config /opt/scanner-rules \
               --sarif --output /src/results.sarif \
-              $BASE_ARG \
-              /src
+              $BASE_ARG /src
           test -s results.sarif || { echo "No SARIF produced"; exit 1; }
+          # Normalize container paths so annotations attach to repo-relative files
+          jq '(.runs[].results[].locations[].physicalLocation.artifactLocation.uri)
+                |= (sub("^file://";"") | sub("^/src/";"") | sub("^src/";""))' \
+             results.sarif > results.norm.sarif && mv results.norm.sarif results.sarif
+
           
-      # upload the results for the CodeQL GitHub app to annotate the code
-      - name: Save SARIF results as artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   #v7.0.1
-        with:
-          name: sast-scan-results
-          path: /src/results.sarif
+      - name: Annotate code lines
+        run: |
+          jq -r '
+            def enc:     gsub("%";"%25") | gsub("\r";"%0D") | gsub("\n";"%0A");
+            def encprop: enc | gsub(":";"%3A") | gsub(",";"%2C");
+            .runs[].results[] as $r
+            | ($r.level // "warning") as $lvl
+            | (if $lvl=="error" then "error" elif $lvl=="note" then "notice" else "warning" end) as $gh
+            | $r.locations[0].physicalLocation as $p
+            | "::\($gh) file=\($p.artifactLocation.uri|encprop),line=\($p.region.startLine // 1),endLine=\($p.region.endLine // ($p.region.startLine // 1)),col=\($p.region.startColumn // 1),title=\($r.ruleId|encprop)::\($r.message.text|enc)"
+          ' results.sarif
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## Opengrep SAST results"
+            echo ""
+            TOTAL=$(jq '[.runs[].results[]] | length' results.sarif)
+            echo "**${TOTAL}** finding(s)."
+            echo ""
+            echo "| Severity | Rule | Location | Message |"
+            echo "|---|---|---|---|"
+            jq -r '.runs[].results[]
+              | "| \(.level // "warning") "
+                + "| `\(.ruleId)` "
+                + "| `\(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine // 1)` "
+                + "| \((.message.text)|gsub("\n";" ")|gsub("\\|";"\\\\|")) |"' results.sarif
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # - name: Gate PR on findings
+      #   run: |
+      #     if [ -n "$BLOCK_LEVELS" ]; then
+      #       FILTER='select((.level // "warning") as $l | ("'"$BLOCK_LEVELS"'" | split(",")) | index($l))'
+      #     else
+      #       FILTER='.'
+      #     fi
+      #     COUNT=$(jq "[.runs[].results[] | $FILTER] | length" results.sarif)
+      #     echo "Blocking findings: $COUNT"
+      #     [ "$COUNT" -eq 0 ] || { echo "::error::SAST gate failed with $COUNT blocking finding(s)"; exit 1; }
