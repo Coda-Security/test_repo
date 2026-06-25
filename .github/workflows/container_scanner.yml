@@ -82,6 +82,12 @@ jobs:
             -t "container-image:${{ matrix.image.slug }}-${{ github.sha }}" \
             "$ctx"
 
+      - name: Manual Trivy Setup
+        uses: aquasecurity/setup-trivy@v0.2.0
+        with:
+          cache: true
+          version: v0.71.2
+          
       - name: Run scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 #v0.36.0
         with:
@@ -95,6 +101,7 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
           scanners: 'vuln'
           limit-severities-for-sarif: 'true'
+          skip-setup-trivy: true
 
       - name: Summarise findings in the run log
         if: always()
