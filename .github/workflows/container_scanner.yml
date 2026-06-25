@@ -4,7 +4,15 @@ on:
   pull_request:
     paths:
       - '**/Dockerfile'
+      - '**/Dockerfile.*'
+      - '**/*.Dockerfile'
+      - '**/Dockerfile-*'
+      - '**/*.dockerfile'
       - '**/Containerfile'
+      - '**/Containerfile.*'
+      - '**/*.Containerfile'
+      - '**/Containerfile-*'
+      - '**/*.containerfile'
   release:
     types: [published]
   workflow_dispatch:
@@ -17,28 +25,55 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
-          fetch-depth: 0                      # needed for the push diff
+          fetch-depth: 0                      # needed for the PR base...head diff
       - id: find
         env:
-          EVENT:  ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
-          SHA:    ${{ github.sha }}
+          EVENT:   ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          shopt -s nocasematch          # so Dockerfile/dockerfile/DOCKERFILE all match
+
+          # Conventional name → trust it, no content read.
+          looks_like_dockerfile_name() {
+            case "$(basename "$1")" in
+              Dockerfile|Dockerfile.*|*.Dockerfile|Dockerfile-*|\
+              Containerfile|Containerfile.*|*.Containerfile|Containerfile-*) return 0 ;;
+            esac
+            return 1
+          }
+
+          # Arbitrary name → sniff content. First real instruction must be FROM,
+          # plus a second directive so a file that merely starts with FROM is not a hit.
+          is_dockerfile_content() {
+            local f="$1"
+            grep -Iq . "$f" || return 1               # skip binary/empty cheaply
+            awk '
+              /^[[:space:]]*$/ { next }
+              /^[[:space:]]*#/ { next }
+              /^[[:space:]]*[Aa][Rr][Gg][[:space:]]/ { next }
+              { exit ($0 ~ /^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]+[^[:space:]]/) ? 0 : 1 }
+              END { exit 1 }
+            ' "$f" || return 1
+            grep -IqiE '^[[:space:]]*(RUN|COPY|ADD|CMD|ENTRYPOINT|ENV|EXPOSE|WORKDIR|VOLUME|LABEL|USER|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)([[:space:]]|$)' "$f"
+          }
+
+          is_candidate() {
+            local f="$1"
+            [ -f "$f" ] || return 1                    # also drops deletions in a diff
+            looks_like_dockerfile_name "$f" && return 0
+            is_dockerfile_content "$f"
+          }
+
           declare -a files=()
-          if [ "$EVENT" = "push" ] && [ -n "${BEFORE:-}" ] \
-             && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
-            # changed Dockerfiles in this push (skip deletions via -f test)
+          if [ "$EVENT" = "pull_request" ]; then
+            # diff is small → content-check every changed file (catches odd names too)
             while IFS= read -r f; do
-              case "$(basename "$f")" in
-                Dockerfile|Containerfile) [ -f "$f" ] && files+=("$f") ;;
-              esac
-            done < <(git diff --name-only "$BEFORE" "$SHA")
-          else
-            # release / workflow_dispatch / first-push: scan the whole repo
-            while IFS= read -r f; do files+=("${f#./}"); done \
-              < <(find . -type f \( -name Dockerfile -o -name Containerfile \) -not -path './.git/*')
+              is_candidate "$f" && files+=("$f")
+            done < <(git diff --name-only "$PR_BASE...$PR_HEAD")
           fi
+
           if [ "${#files[@]}" -eq 0 ]; then
             echo "dockerfiles=[]" >> "$GITHUB_OUTPUT"
           else
@@ -53,7 +88,7 @@ jobs:
     if: needs.discover.outputs.dockerfiles != '[]'
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false        # one bad image must not cancel the others
+      fail-fast: false
       matrix:
         image: ${{ fromJSON(needs.discover.outputs.dockerfiles) }}
     steps:
@@ -64,7 +99,7 @@ jobs:
           DF: ${{ matrix.image.path }}
         run: |
           set -euo pipefail
-          ctx="$(dirname "$DF")"              # ASSUMPTION: context = Dockerfile's dir (see note)
+          ctx="$(dirname "$DF")"              # ASSUMPTION: context = Dockerfile's dir
           docker build -f "$DF" \
             -t "container-image:${{ matrix.image.slug }}-${{ github.sha }}" \
             "$ctx"
@@ -107,7 +142,7 @@ jobs:
       #     scan-type: image
       #     image-ref: 'container-image:${{ matrix.image.slug }}-${{ github.sha }}'
       #     format: table
-      #     exit-code: '1'              # CHANGED from '0' — see note below
+      #     exit-code: '1'
       #     ignore-unfixed: true
       #     vuln-type: 'os,library'
       #     severity: 'CRITICAL'
@@ -117,5 +152,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   #v7.0.1
         with:
-          name: container-image-scan-results-${{ matrix.image.slug }}   # must be unique per matrix leg
+          name: container-image-scan-results-${{ matrix.image.slug }}
           path: container-image-results.sarif
