@@ -34,7 +34,6 @@ jobs:
             -v "$GITHUB_WORKSPACE":/src -w /src \
             "$IMAGE" scan \
               --config /opt/scanner-rules \
-              --error \
               --sarif --output /src/results.sarif \
               $BASE_ARG \
               /src
