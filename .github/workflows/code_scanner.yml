@@ -55,31 +55,38 @@ jobs:
           jq -r '
             def enc:     gsub("%";"%25") | gsub("\r";"%0D") | gsub("\n";"%0A");
             def encprop: enc | gsub(":";"%3A") | gsub(",";"%2C");
+            def ghtype($l): if $l=="error" then "error" elif $l=="note" then "notice" else "warning" end;
+            def sev($l):    if $l=="error" then "HIGH"  elif $l=="note" then "LOW"    else "MEDIUM" end;
             .runs[].results[] as $r
             | ($r.level // "warning") as $lvl
-            | (if $lvl=="error" then "error" elif $lvl=="note" then "notice" else "warning" end) as $gh
             | $r.locations[0].physicalLocation as $p
-            | "::\($gh) file=\($p.artifactLocation.uri|encprop),line=\($p.region.startLine // 1),endLine=\($p.region.endLine // ($p.region.startLine // 1)),col=\($p.region.startColumn // 1),title=\($r.ruleId|encprop)::\($r.message.text|enc)"
+            | "::\(ghtype($lvl)) "
+              + "file=\($p.artifactLocation.uri|encprop),"
+              + "line=\($p.region.startLine // 1),"
+              + "endLine=\($p.region.endLine // ($p.region.startLine // 1)),"
+              + "col=\($p.region.startColumn // 1),"
+              + "title=[\(sev($lvl))] \($r.ruleId|encprop)"
+              + "::\($r.message.text|enc)"
           ' results.sarif
 
       - name: Write job summary
         if: always()
         run: |
           {
-            echo "## Opengrep SAST results"
-            echo ""
-            TOTAL=$(jq '[.runs[].results[]] | length' results.sarif)
-            echo "**${TOTAL}** finding(s)."
+            echo "## SAST Scan Results"
             echo ""
             echo "| Severity | Rule | Location | Message |"
             echo "|---|---|---|---|"
-            jq -r '.runs[].results[]
-              | "| \(.level // "warning") "
+            jq -r '
+              def sev($l): if $l=="error" then "HIGH" elif $l=="note" then "LOW" else "MEDIUM" end;
+              .runs[].results[]
+              | ((.level // "warning")) as $lvl
+              | "| \(sev($lvl)) "
                 + "| `\(.ruleId)` "
                 + "| `\(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine // 1)` "
-                + "| \((.message.text)|gsub("\n";" ")|gsub("\\|";"\\\\|")) |"' results.sarif
+                + "| \((.message.text)|gsub("\n";" ")|gsub("\\|";"\\\\|")) |"
+            ' results.sarif
           } >> "$GITHUB_STEP_SUMMARY"
-
       # - name: Gate PR on findings
       #   run: |
       #     if [ -n "$BLOCK_LEVELS" ]; then
