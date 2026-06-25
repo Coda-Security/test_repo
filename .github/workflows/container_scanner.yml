@@ -93,8 +93,9 @@ jobs:
         with:
           scan-type: image
           image-ref: 'container-image:${{ matrix.image.slug }}-${{ github.sha }}'
-          format: sarif
-          output: container-image-results.sarif
+          format: text
+          hide-progress: true
+          output: trivy.txt
           exit-code: '0'
           ignore-unfixed: true
           vuln-type: 'os,library'
@@ -104,21 +105,17 @@ jobs:
           skip-setup-trivy: true
 
       - name: Summarise findings in the run log
-        if: always()
         run: |
-          echo "### ${{ matrix.image.path }}" | tee -a "$GITHUB_STEP_SUMMARY"
-          if [ -s container-image-results.sarif ] && jq -e . container-image-results.sarif >/dev/null 2>&1; then
-            count=$(jq '[.runs[].results[]] | length' container-image-results.sarif)
-            if [ "$count" -eq 0 ]; then
-              echo "✅ No findings (CRITICAL/HIGH/MEDIUM)." | tee -a "$GITHUB_STEP_SUMMARY"
-            else
-              echo "Container image scanner reported ${count} finding(s):" | tee -a "$GITHUB_STEP_SUMMARY"
-              jq -r '.runs[].results[] | "- " + (.ruleId // "?") + ": " + (.message.text // "")' \
-                container-image-results.sarif | head -40 | tee -a "$GITHUB_STEP_SUMMARY"
-            fi
-          else
-            echo "⚠️ No parseable SARIF — scan likely failed. **Not a clean result.** Check the scan log." \
-              | tee -a "$GITHUB_STEP_SUMMARY"
+          if [[ -s trivy.txt ]]; then
+            {
+              echo "### Security Output"
+              echo "<details><summary>Click to expand</summary>"
+              echo ""
+              echo '```terraform'
+              cat trivy.txt
+              echo '```'
+              echo "</details>"
+            } >> $GITHUB_STEP_SUMMARY
           fi
 
       # - name: Container image scan gateway (block on CRITICAL only)
@@ -138,4 +135,4 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   #v7.0.1
         with:
           name: container-image-scan-results-${{ matrix.image.slug }}
-          path: container-image-results.sarif
+          path: trivy.txt
