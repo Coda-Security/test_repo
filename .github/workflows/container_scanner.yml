@@ -16,7 +16,7 @@ jobs:
     outputs:
       dockerfiles: ${{ steps.find.outputs.dockerfiles }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
         with:
           fetch-depth: 0                      # needed for the PR base...head diff
       - id: find
@@ -70,7 +70,7 @@ jobs:
       matrix:
         image: ${{ fromJSON(needs.discover.outputs.dockerfiles) }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
 
       - name: Build an image from Dockerfile
         env:
@@ -83,7 +83,7 @@ jobs:
             "$ctx"
 
       - name: Manual Trivy Setup
-        uses: aquasecurity/setup-trivy@v0.2.0
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 #v0.3.1
         with:
           cache: true
           version: v0.71.2
