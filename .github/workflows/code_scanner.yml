@@ -40,7 +40,7 @@ jobs:
           test -s results.sarif || { echo "No SARIF produced"; exit 1; }
 
           # keeps tool.driver.name/version (spec-valid), drops the bulky rules metadata
-          jq 'del(.runs[].tool.driver.rules)'
+          jq 'del(.runs[].tool.driver.rules)' results.sarif > tmp && mv tmp results.sarif
           
           # Normalize container paths so annotations attach to repo-relative files
           jq '(.runs[].results[].locations[].physicalLocation.artifactLocation.uri)
