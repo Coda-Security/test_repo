@@ -8,14 +8,6 @@ on:
       - '**/*.Dockerfile'
       - '**/Dockerfile-*'
       - '**/*.dockerfile'
-      - '**/Containerfile'
-      - '**/Containerfile.*'
-      - '**/*.Containerfile'
-      - '**/Containerfile-*'
-      - '**/*.containerfile'
-  release:
-    types: [published]
-  workflow_dispatch:
 
 jobs:
   discover:
@@ -35,11 +27,10 @@ jobs:
           set -euo pipefail
           shopt -s nocasematch          # so Dockerfile/dockerfile/DOCKERFILE all match
 
-          # Conventional name → trust it, no content read.
+          # Conventional Dockerfile name → trust it, no content read.
           looks_like_dockerfile_name() {
             case "$(basename "$1")" in
-              Dockerfile|Dockerfile.*|*.Dockerfile|Dockerfile-*|\
-              Containerfile|Containerfile.*|*.Containerfile|Containerfile-*) return 0 ;;
+              Dockerfile|Dockerfile.*|*.Dockerfile|Dockerfile-*) return 0 ;;
             esac
             return 1
           }
@@ -62,6 +53,11 @@ jobs:
           is_candidate() {
             local f="$1"
             [ -f "$f" ] || return 1                    # also drops deletions in a diff
+            # Containerfiles are out of scope, even though their syntax is identical
+            # to a Dockerfile (so content sniffing would otherwise match them).
+            case "$(basename "$f")" in
+              Containerfile|Containerfile.*|*.Containerfile|Containerfile-*) return 1 ;;
+            esac
             looks_like_dockerfile_name "$f" && return 0
             is_dockerfile_content "$f"
           }
