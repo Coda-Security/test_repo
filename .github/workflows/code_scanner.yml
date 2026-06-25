@@ -75,7 +75,7 @@ jobs:
               + "::\($r.message.text|enc)"
           ' results.sarif
 
-      - name: Write job summary
+      - name: Scan reporting
         if: always()
         run: |
           {
