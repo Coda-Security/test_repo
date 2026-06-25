@@ -1,14 +1,15 @@
 name: Container Image Scanner
 
 on:
-  pull_request:
+  push:
+    branches: [main, master]
     paths:
       - '**/Dockerfile'
       - '**/Dockerfile.*'
       - '**/*.Dockerfile'
       - '**/Dockerfile-*'
       - '**/*.dockerfile'
-
+    
 jobs:
   discover:
     runs-on: ubuntu-latest
@@ -20,54 +21,35 @@ jobs:
           fetch-depth: 0                      # needed for the PR base...head diff
       - id: find
         env:
-          EVENT:   ${{ github.event_name }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          SHA:    ${{ github.sha }}
         run: |
           set -euo pipefail
-          shopt -s nocasematch          # so Dockerfile/dockerfile/DOCKERFILE all match
+          shopt -s nocasematch
 
-          # Conventional Dockerfile name → trust it, no content read.
-          looks_like_dockerfile_name() {
-            case "$(basename "$1")" in
+          is_dockerfile() {
+            local f="$1"
+            [ -f "$f" ] || return 1                    # drops deletions in the diff
+            case "$(basename "$f")" in
+              Containerfile|Containerfile.*|*.Containerfile|Containerfile-*) return 1 ;;
               Dockerfile|Dockerfile.*|*.Dockerfile|Dockerfile-*) return 0 ;;
             esac
             return 1
           }
 
-          # Arbitrary name → sniff content. First real instruction must be FROM,
-          # plus a second directive so a file that merely starts with FROM is not a hit.
-          is_dockerfile_content() {
-            local f="$1"
-            grep -Iq . "$f" || return 1               # skip binary/empty cheaply
-            awk '
-              /^[[:space:]]*$/ { next }
-              /^[[:space:]]*#/ { next }
-              /^[[:space:]]*[Aa][Rr][Gg][[:space:]]/ { next }
-              { exit ($0 ~ /^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]+[^[:space:]]/) ? 0 : 1 }
-              END { exit 1 }
-            ' "$f" || return 1
-            grep -IqiE '^[[:space:]]*(RUN|COPY|ADD|CMD|ENTRYPOINT|ENV|EXPOSE|WORKDIR|VOLUME|LABEL|USER|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)([[:space:]]|$)' "$f"
-          }
-
-          is_candidate() {
-            local f="$1"
-            [ -f "$f" ] || return 1                    # also drops deletions in a diff
-            # Containerfiles are out of scope, even though their syntax is identical
-            # to a Dockerfile (so content sniffing would otherwise match them).
-            case "$(basename "$f")" in
-              Containerfile|Containerfile.*|*.Containerfile|Containerfile-*) return 1 ;;
-            esac
-            looks_like_dockerfile_name "$f" && return 0
-            is_dockerfile_content "$f"
-          }
-
           declare -a files=()
-          if [ "$EVENT" = "pull_request" ]; then
-            # diff is small → content-check every changed file (catches odd names too)
+          if [ -n "${BEFORE:-}" ] \
+             && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
             while IFS= read -r f; do
-              is_candidate "$f" && files+=("$f")
-            done < <(git diff --name-only "$PR_BASE...$PR_HEAD")
+              is_dockerfile "$f" && files+=("$f")
+            done < <(git diff --name-only "$BEFORE" "$SHA")
+          else
+            while IFS= read -r f; do
+              f="${f#./}"
+              is_dockerfile "$f" && files+=("$f")
+            done < <(find . -type f \
+                       \( -iname 'Dockerfile' -o -iname 'Dockerfile.*' -o -iname '*.Dockerfile' -o -iname 'Dockerfile-*' \) \
+                       -not -path './.git/*' -not -path '*/node_modules/*')
           fi
 
           if [ "${#files[@]}" -eq 0 ]; then
