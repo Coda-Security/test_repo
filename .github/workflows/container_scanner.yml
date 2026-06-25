@@ -93,7 +93,7 @@ jobs:
         with:
           scan-type: image
           image-ref: 'container-image:${{ matrix.image.slug }}-${{ github.sha }}'
-          format: text
+          format: table
           hide-progress: true
           output: trivy.txt
           exit-code: '0'
