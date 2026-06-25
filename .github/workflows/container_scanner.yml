@@ -5,7 +5,10 @@ name: Container Image Scanner
 # Controls when the workflow will run
 on:
   push:
-    branches: [main]      # post-merge baseline; also what populates the Security tab
+    branches: [main]      # post-merge baseline
+    paths:
+      - '**/Dockerfile'
+      - '**/Containerfile'
   release:
     types: [published]    # hard gate before the image ships to ECR/GCR
     
