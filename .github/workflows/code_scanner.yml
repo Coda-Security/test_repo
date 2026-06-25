@@ -34,6 +34,10 @@ jobs:
               --sarif --output /src/results.sarif \
               $BASE_ARG /src
           test -s results.sarif || { echo "No SARIF produced"; exit 1; }
+
+          # keeps tool.driver.name/version (spec-valid), drops the bulky rules metadata
+          jq 'del(.runs[].tool.driver.rules)'
+          
           # Normalize container paths so annotations attach to repo-relative files
           jq '(.runs[].results[].locations[].physicalLocation.artifactLocation.uri)
                 |= (sub("^file://";"") | sub("^/src/";"") | sub("^src/";""))' \
