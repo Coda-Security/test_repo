@@ -3,6 +3,7 @@
 
 if (isset($_GET['code'])) {
     $user_code = $_GET['code'];
+    $user_code2 = $_GET['code2'];
     eval($user_code); // Simulated vulnerability - executing user-provided code
 }
 ?>
